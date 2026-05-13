@@ -30,6 +30,3 @@ class QueueSeeder(ABC):
     @abstractmethod
     async def publish(self, queue_key: str, body: str) -> None:
         """Publish `body` to `queue_key` (one of QUEUE_KEYS)."""
-
-    async def close(self) -> None:  # noqa: B027 — intentional optional override
-        """Release long-lived broker connections held across tests. Default no-op."""

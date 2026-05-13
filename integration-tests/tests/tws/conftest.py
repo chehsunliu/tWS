@@ -182,9 +182,3 @@ async def db_seeder_fixture() -> AsyncGenerator[DbSeeder]:
 async def queue_seeder_fixture() -> AsyncGenerator[QueueSeeder]:
     async with queue_seeder as seeder:
         yield seeder
-
-
-@pytest.fixture(scope="session", autouse=True)
-async def _close_queue_seeder() -> AsyncGenerator[None]:
-    yield
-    await queue_seeder.close()
