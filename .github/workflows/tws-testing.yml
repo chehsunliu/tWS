@@ -26,8 +26,8 @@ jobs:
               - 'openapi.yaml'
               - '.github/workflows/tws-testing.yml'
 
-  rust-integration-test:
-    name: rust-integration-test (${{ matrix.profile }})
+  integration-test:
+    name: integration-test (${{ matrix.profile }})
     needs: changes
     runs-on: ubuntu-latest
     strategy:
