@@ -54,7 +54,6 @@ class SqsQueueSeeder(QueueSeeder):
         self._endpoint_url = endpoint_url
         self._queue_urls = queue_urls
         self._session = aioboto3.Session()
-        self._client_ctx = None
         self._client = None
         self._queue_attrs: dict[str, dict[str, str]] = {}
 
@@ -67,7 +66,6 @@ class SqsQueueSeeder(QueueSeeder):
                 aws_access_key_id="x",
                 aws_secret_access_key="x",
             )
-            self._client_ctx = client_ctx
             client = await client_ctx.__aenter__()
             self._client = client
             for url in self._queue_urls.values():
@@ -76,14 +74,8 @@ class SqsQueueSeeder(QueueSeeder):
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        # Keep the client alive across tests; the test session calls `close()` once at teardown.
+        # Keep the client alive across tests; process exit cleans it up.
         pass
-
-    async def close(self) -> None:
-        if self._client_ctx is not None:
-            await self._client_ctx.__aexit__(None, None, None)
-            self._client_ctx = None
-            self._client = None
 
     async def reset(self) -> None:
         # purge_queue is not immediate in ElasticMQ/SQS — leftover messages can
