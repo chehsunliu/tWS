@@ -1,0 +1,98 @@
+services:
+  postgres:
+    image: postgres:18.3-alpine@sha256:54451ecb8ab38c24c3ec123f2fd501303a3a1856a5c66e98cecf2460d5e1e9d7
+    restart: always
+    ports:
+      - "127.0.0.1:0:5432"
+    environment:
+      POSTGRES_DB: tws-db
+      POSTGRES_USER: tws-admin
+      POSTGRES_PASSWORD: "tws-admin"
+    command:
+      - "-c"
+      - "log_statement=all"
+
+  postgres-init:
+    image: flyway/flyway:12-alpine@sha256:02a170647a52f36f9255d726a33098ad272fb18b2b65a757d49c626f477b8653
+    depends_on:
+      - postgres
+    restart: on-failure
+    volumes:
+      - type: bind
+        source: ../storage/postgres/sql
+        target: /flyway/sql
+    command:
+      - "-url=jdbc:postgresql://postgres:5432/tws-db"
+      - "-user=tws-admin"
+      - "-password=tws-admin"
+      - "-locations=filesystem:/flyway/sql"
+      - "-connectRetries=15"
+      - "migrate"
+
+  mariadb:
+    image: mariadb:12.2@sha256:e0236fc6386e7eacd9359e59d0a078bd7aa0d18280d36d13061121bedeaee903
+    restart: always
+    ports:
+      - "127.0.0.1:0:3306"
+    environment:
+      MARIADB_DATABASE: tws-db
+      MARIADB_USER: tws-admin
+      MARIADB_PASSWORD: "tws-admin"
+      MARIADB_ROOT_PASSWORD: "tws-admin"
+    command:
+      - "--general-log=1"
+      - "--general-log-file=/var/log/mysql/general.log"
+
+  mariadb-init:
+    image: flyway/flyway:12-alpine@sha256:02a170647a52f36f9255d726a33098ad272fb18b2b65a757d49c626f477b8653
+    depends_on:
+      - mariadb
+    restart: on-failure
+    volumes:
+      - type: bind
+        source: ../storage/mariadb/sql
+        target: /flyway/sql
+    command:
+      - "-url=jdbc:mariadb://mariadb:3306/tws-db"
+      - "-user=tws-admin"
+      - "-password=tws-admin"
+      - "-locations=filesystem:/flyway/sql"
+      - "-connectRetries=15"
+      - "migrate"
+
+  sqs:
+    image: softwaremill/elasticmq-native:latest@sha256:e4580ab9ad1bd5cd37b4ba04911bc5ccc8cd2d9ab4de56ece65acee71c24e05c
+    restart: always
+    ports:
+      - "127.0.0.1:0:9324"
+      - "127.0.0.1:0:9325"
+    volumes:
+      - type: bind
+        source: ./docker/elasticmq.conf
+        target: /opt/elasticmq.conf
+
+  sqs-ui:
+    image: softwaremill/elasticmq-ui:latest@sha256:549f467ed95d7465cb471b43cd01a8691f5ac0fa5debc0d49ba65a73341c07fb
+    ports:
+      - "127.0.0.1:0:3000"
+    environment:
+      SQS_ENDPOINT: http://sqs:9324
+    depends_on:
+      - sqs
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine@sha256:1a43764bdcf116542e7c8c794adc67c79461727da16d474e9e21483fe7f716d3
+    restart: always
+    ports:
+      - "127.0.0.1:0:5672"
+      - "127.0.0.1:0:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: tws-admin
+      RABBITMQ_DEFAULT_PASS: tws-admin
+    volumes:
+      - type: bind
+        source: ./docker/rabbitmq.conf
+        target: /etc/rabbitmq/rabbitmq.conf
+      - type: bind
+        source: ./docker/rabbitmq-definitions.json
+        target: /etc/rabbitmq/definitions.json
