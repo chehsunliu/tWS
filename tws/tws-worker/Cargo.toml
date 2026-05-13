@@ -1,0 +1,8 @@
+[package]
+name = "tws-worker"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tws-contract = { path = "../tws-contract" }
+tws-impl = { path = "../tws-impl" }

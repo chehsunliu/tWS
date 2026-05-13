@@ -1,0 +1,108 @@
+import json
+from typing import Any
+
+import aioboto3
+
+from tws_testkit.seeder.queue.base import QUEUE_KEYS, QueueReader, QueueSeeder
+
+# Attributes accepted by SQS CreateQueue. get_queue_attributes returns extra
+# read-only fields (ApproximateNumberOfMessages, CreatedTimestamp, QueueArn, ...)
+# that must be filtered out before recreating.
+_CREATABLE_ATTRS = frozenset(
+    {
+        "DelaySeconds",
+        "MaximumMessageSize",
+        "MessageRetentionPeriod",
+        "Policy",
+        "ReceiveMessageWaitTimeSeconds",
+        "RedrivePolicy",
+        "VisibilityTimeout",
+        "KmsMasterKeyId",
+        "KmsDataKeyReusePeriodSeconds",
+        "SqsManagedSseEnabled",
+        "FifoQueue",
+        "ContentBasedDeduplication",
+        "DeduplicationScope",
+        "FifoThroughputLimit",
+    }
+)
+
+
+class SqsQueueReader(QueueReader):
+    def __init__(self, client, queue_url: str):
+        self._client = client
+        self._queue_url = queue_url
+
+    async def receive_one(self, *, timeout_seconds: float = 5.0) -> dict[str, Any] | None:
+        # AWS SDK long-poll waits up to `WaitTimeSeconds` (max 20). It expects an int.
+        wait = max(1, min(20, int(timeout_seconds)))
+        resp = await self._client.receive_message(
+            QueueUrl=self._queue_url,
+            WaitTimeSeconds=wait,
+            MaxNumberOfMessages=1,
+        )
+        msgs = resp.get("Messages", [])
+        if not msgs:
+            return None
+        msg = msgs[0]
+        await self._client.delete_message(QueueUrl=self._queue_url, ReceiptHandle=msg["ReceiptHandle"])
+        return json.loads(msg["Body"])
+
+
+class SqsQueueSeeder(QueueSeeder):
+    def __init__(self, *, endpoint_url: str, queue_urls: dict[str, str]):
+        self._endpoint_url = endpoint_url
+        self._queue_urls = queue_urls
+        self._session = aioboto3.Session()
+        self._client_ctx = None
+        self._client = None
+        self._queue_attrs: dict[str, dict[str, str]] = {}
+
+    async def __aenter__(self) -> "SqsQueueSeeder":
+        if self._client is None:
+            client_ctx = self._session.client(
+                "sqs",
+                endpoint_url=self._endpoint_url,
+                region_name="us-east-1",
+                aws_access_key_id="x",
+                aws_secret_access_key="x",
+            )
+            self._client_ctx = client_ctx
+            client = await client_ctx.__aenter__()
+            self._client = client
+            for url in self._queue_urls.values():
+                resp = await client.get_queue_attributes(QueueUrl=url, AttributeNames=["All"])
+                self._queue_attrs[url] = {k: v for k, v in resp.get("Attributes", {}).items() if k in _CREATABLE_ATTRS}
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        # Keep the client alive across tests; the test session calls `close()` once at teardown.
+        pass
+
+    async def close(self) -> None:
+        if self._client_ctx is not None:
+            await self._client_ctx.__aexit__(None, None, None)
+            self._client_ctx = None
+            self._client = None
+
+    async def reset(self) -> None:
+        # purge_queue is not immediate in ElasticMQ/SQS — leftover messages can
+        # leak into the next test. Delete and recreate each queue with the
+        # attributes captured at __aenter__ time.
+        assert self._client is not None
+        for url, attrs in self._queue_attrs.items():
+            name = url.rsplit("/", 1)[-1]
+            await self._client.delete_queue(QueueUrl=url)
+            await self._client.create_queue(QueueName=name, Attributes=attrs)
+
+    def reader(self, queue_key: str) -> QueueReader:
+        if queue_key not in QUEUE_KEYS:
+            raise ValueError(f"unknown queue key {queue_key!r}; expected one of {QUEUE_KEYS}")
+        assert self._client is not None
+        return SqsQueueReader(self._client, self._queue_urls[queue_key])
+
+    async def publish(self, queue_key: str, body: str) -> None:
+        if queue_key not in QUEUE_KEYS:
+            raise ValueError(f"unknown queue key {queue_key!r}; expected one of {QUEUE_KEYS}")
+        assert self._client is not None
+        await self._client.send_message(QueueUrl=self._queue_urls[queue_key], MessageBody=body)

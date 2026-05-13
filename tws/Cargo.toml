@@ -1,0 +1,8 @@
+[workspace]
+resolver = "3"
+members = [
+    "tws-backend",
+    "tws-contract",
+    "tws-impl",
+    "tws-worker",
+]
